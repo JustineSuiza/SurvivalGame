@@ -181,6 +181,8 @@ water.position.y = WATER_LEVEL;
 scene.add(water);
 
 const obstacles = [];
+const WIND_X = 0.8;
+const WIND_Z = 0.6;
 const tmpM = new THREE.Matrix4();
 const tmpQ = new THREE.Quaternion();
 const tmpV = new THREE.Vector3();
@@ -209,6 +211,17 @@ const rocks = [];
 let treeMeshes = null;
 let rockMesh = null;
 const harvestFx = new Set();
+
+const GRASS_COUNT = 26000;
+const GRASS_RADIUS = 48;
+const GRASS_MAX_RESPAWN = 1500;
+let grassMesh = null;
+let grassBlades = null;
+const grassUniforms = {
+  uTime: { value: 0 },
+  uGust: { value: 1 },
+  uWindDir: { value: new THREE.Vector2(WIND_X, WIND_Z) },
+};
 
 function scatterTrees() {
   const count = 620;
@@ -316,28 +329,104 @@ function scatterRocks() {
   rockMesh = mesh;
 }
 
+function grassSpot(px, pz) {
+  let x = px, h = 0, z = pz;
+  for (let k = 0; k < 12; k++) {
+    const a = Math.random() * 6.283;
+    const r = GRASS_RADIUS * Math.sqrt(Math.random());
+    x = px + Math.cos(a) * r;
+    z = pz + Math.sin(a) * r;
+    h = heightAt(x, z);
+    if (h >= 1.5 && h <= 38 && slopeAt(x, z) <= 0.7) return { x, h, z };
+  }
+  return { x, h: heightAt(x, z), z };
+}
+
+function putGrass(i, x, h, z) {
+  const b = grassBlades[i];
+  b.x = x; b.h = h; b.z = z;
+  place(grassMesh, i, x, h, z, { x: b.sx, y: b.sy, z: b.sz }, b.rotY);
+}
+
 function scatterGrass() {
-  const count = 7000;
   const geo = new THREE.ConeGeometry(0.16, 1.1, 3).translate(0, 0.55, 0);
-  const mesh = new THREE.InstancedMesh(
-    geo,
-    new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true }),
-    count
-  );
+  const mat = new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = grassUniforms.uTime;
+    sh.uniforms.uGust = grassUniforms.uGust;
+    sh.uniforms.uWindDir = grassUniforms.uWindDir;
+    sh.vertexShader = sh.vertexShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nuniform float uTime;\nuniform float uGust;\nuniform vec2 uWindDir;"
+      )
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+#ifdef USE_INSTANCING
+  vec3 gP = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+  float gPh = gP.x * 1.7 + gP.z * 1.35;
+  float gW = sin(uTime * 2.2 + gPh) * 0.62 + sin(uTime * 4.1 + gPh * 1.7) * 0.38;
+  float gH = clamp(transformed.y * 0.909, 0.0, 1.0);
+  mat3 gIm = mat3(instanceMatrix);
+  vec3 gWd = vec3(uWindDir.x, 0.0, uWindDir.y);
+  vec3 gOd = vec3(dot(gIm[0], gWd), dot(gIm[1], gWd), dot(gIm[2], gWd));
+  float gOl = length(gOd);
+  gOd = gOl > 1e-5 ? gOd / gOl : vec3(1.0, 0.0, 0.0);
+  float gB = gW * gH * gH * 0.2 * uGust;
+  transformed.x += gOd.x * gB;
+  transformed.z += gOd.z * gB;
+#endif`
+      );
+  };
+  const mesh = new THREE.InstancedMesh(geo, mat, GRASS_COUNT);
+  grassMesh = mesh;
+  grassBlades = new Array(GRASS_COUNT);
   let n = 0;
   const col = new THREE.Color();
-  while (n < count) {
-    const s = sampleSpot(1.5, 38, 0.7);
-    if (!s) break;
-    place(mesh, n, s.x, s.h, s.z, { x: 1 + Math.random(), y: 0.7 + Math.random() * 1.3, z: 1 + Math.random() }, Math.random() * 6.28);
+  for (let i = 0; i < GRASS_COUNT; i++) {
+    const b = {
+      x: 0, h: 0, z: 0,
+      sx: 1 + Math.random(),
+      sy: 0.45 + Math.random() * 0.55,
+      sz: 1 + Math.random(),
+      rotY: Math.random() * 6.28,
+    };
+    grassBlades[i] = b;
     const g = 0.7 + Math.random() * 0.6;
     col.setRGB(0.22 * g, (0.5 + Math.random() * 0.3) * g, 0.18 * g);
-    mesh.setColorAt(n, col);
+    mesh.setColorAt(i, col);
+    const s = grassSpot(0, 0);
+    place(mesh, i, s.x, s.h, s.z, { x: b.sx, y: b.sy, z: b.sz }, b.rotY);
+    b.x = s.x; b.h = s.h; b.z = s.z;
     n++;
   }
   mesh.count = n;
   mesh.instanceMatrix.needsUpdate = true;
   scene.add(mesh);
+}
+
+function updateGrass(t) {
+  if (!grassMesh) return;
+  grassUniforms.uTime.value = t;
+  grassUniforms.uGust.value =
+    0.62 + 0.26 * Math.sin(t * 0.31) + 0.18 * Math.sin(t * 0.117 + 2.1);
+  const px = player.pos.x;
+  const pz = player.pos.z;
+  const R2 = GRASS_RADIUS * GRASS_RADIUS;
+  let moved = 0;
+  const n = grassMesh.count;
+  for (let i = 0; i < n; i++) {
+    const b = grassBlades[i];
+    const dx = b.x - px;
+    const dz = b.z - pz;
+    if (dx * dx + dz * dz <= R2) continue;
+    if (moved >= GRASS_MAX_RESPAWN) break;
+    const s = grassSpot(px, pz);
+    putGrass(i, s.x, s.h, s.z);
+    moved++;
+  }
+  if (moved) grassMesh.instanceMatrix.needsUpdate = true;
 }
 
 function scatterBushes() {
@@ -1442,8 +1531,6 @@ function updateHarvestFx(dt, t) {
   if (rocksDirty && rockMesh) rockMesh.instanceMatrix.needsUpdate = true;
 }
 
-const WIND_X = 0.8;
-const WIND_Z = 0.6;
 const WIND_RADIUS = 175;
 const _windAxis = new THREE.Vector3(WIND_Z, 0, -WIND_X);
 const _qWTrunk = new THREE.Quaternion();
@@ -1831,6 +1918,7 @@ function animate() {
     updateCreatures(dt, t, dayF);
     updateHarvestFx(dt, t);
     updateTreeWind(t);
+    updateGrass(t);
     updateClouds(dt);
   }
   updateAmbience(dt, {

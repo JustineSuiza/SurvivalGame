@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import "./style.css";
 import { heightAt, slopeAt, WATER_LEVEL, fbm, smoothstep } from "./terrain.js";
 import { ITEMS } from "./items.js";
@@ -253,6 +252,8 @@ function scatterTrees() {
       state: "alive",
       t: 0,
       shake: 0,
+      wp: Math.random() * 6.283,
+      wv: 0.7 + Math.random() * 0.7,
       obstacle,
     });
     n++;
@@ -596,152 +597,6 @@ lantern.add(lanternBody, lanternGlass, lanternTop, lanternLight);
 lantern.position.set(0.03, -0.1, -0.06);
 armR.add(lantern);
 view.position.set(0, 0, 0);
-
-// ---- First-person arms model (PSX First Person Arms, CC0) ----
-const FP_HAND_POS = new THREE.Vector3(0, -0.33, -0.55);
-const FP_HAND_SEP = 0.5;
-const FP_ARM_DIR = new THREE.Vector3(0, -0.3, -1).normalize();
-let fpArms = null;
-let fpMixer = null;
-let fpActions = null;
-let fpCur = null;
-let fpReady = false;
-let fpMode = false;
-let fpState = "idle";
-let fpJabRight = true;
-
-new GLTFLoader().load(
-  "assets/arms.glb",
-  (g) => {
-    fpArms = g.scene;
-    fpArms.traverse((o) => {
-      if (o.isMesh) o.frustumCulled = false;
-    });
-    fpArms.visible = false;
-    if (!g.animations.length) return;
-    fpMixer = new THREE.AnimationMixer(fpArms);
-    fpActions = {};
-    for (const clip of g.animations) fpActions[clip.name] = fpMixer.clipAction(clip);
-    if (!fpActions.relax) return;
-    fpMixer.addEventListener("finished", () => {
-      if (fpState === "attack") {
-        fpState = "idle";
-        fpPlay("relax", 0.18, false);
-      }
-    });
-    view.add(fpArms);
-    fpMixer.stopAllAction();
-    const ref = fpActions.guard_idle || fpActions.relax;
-    ref.reset();
-    ref.play();
-    fpMixer.update(0.6);
-    ref.stop();
-    fpArms.updateMatrixWorld(true);
-    const inv = fpArms.matrixWorld.clone().invert();
-    const rigPos = (name) => {
-      const o = fpArms.getObjectByName(name);
-      if (!o) return null;
-      return new THREE.Vector3().setFromMatrixPosition(o.matrixWorld).applyMatrix4(inv);
-    };
-    const hR = rigPos("handR");
-    const hL = rigPos("handL");
-    const sR = rigPos("shoulderR");
-    const sL = rigPos("shoulderL");
-    if (hR && hL && sR && sL) {
-      const handMid = hR.clone().add(hL).multiplyScalar(0.5);
-      const shMid = sR.clone().add(sL).multiplyScalar(0.5);
-      const armDir = handMid.clone().sub(shMid);
-      const sepV = hR.clone().sub(hL);
-      const sepLen = sepV.length();
-      if (armDir.lengthSq() > 1e-8 && sepLen > 1e-8) {
-        const q = new THREE.Quaternion().setFromUnitVectors(armDir.normalize(), FP_ARM_DIR);
-        const sepA = sepV.clone().applyQuaternion(q);
-        const cross = new THREE.Vector3().crossVectors(sepA, new THREE.Vector3(1, 0, 0));
-        const dot = THREE.MathUtils.clamp(sepA.clone().normalize().dot(new THREE.Vector3(1, 0, 0)), -1, 1);
-        const roll = Math.atan2(cross.dot(FP_ARM_DIR), dot);
-        q.premultiply(new THREE.Quaternion().setFromAxisAngle(FP_ARM_DIR, roll));
-        const s = THREE.MathUtils.clamp(FP_HAND_SEP / sepLen, 0.55, 2.2);
-        fpArms.quaternion.copy(q);
-        fpArms.scale.setScalar(s);
-        const midW = handMid.applyQuaternion(q).multiplyScalar(s);
-        fpArms.position.copy(FP_HAND_POS).sub(midW);
-      }
-    }
-    fpArms.updateMatrixWorld(true);
-    fpReady = true;
-  },
-  undefined,
-  (e) => console.warn("FP arms failed to load:", e)
-);
-
-function fpPlay(name, fade, loopOnce) {
-  const next = fpActions && fpActions[name];
-  if (!next) return;
-  if (fpCur === next && !loopOnce) return;
-  if (fpCur === next && loopOnce) {
-    next.reset();
-  } else {
-    if (fpCur) fpCur.fadeOut(fade);
-    next.reset();
-    next.enabled = true;
-    next.setEffectiveWeight(1);
-    next.fadeIn(fade);
-    fpCur = next;
-  }
-  next.setLoop(loopOnce ? THREE.LoopOnce : THREE.LoopRepeat, loopOnce ? 1 : Infinity);
-  next.clampWhenFinished = false;
-  next.play();
-}
-
-function playFpAttack(heavy) {
-  if (!fpReady || !fpMode) return;
-  const name = heavy
-    ? fpJabRight
-      ? "push.R"
-      : "push.L"
-    : fpJabRight
-      ? "jab.R"
-      : "jab.L";
-  fpJabRight = !fpJabRight;
-  const a = fpActions[name];
-  if (!a) return;
-  fpPlay(name, 0.05, true);
-  a.timeScale = THREE.MathUtils.clamp(a.getClip().duration / atkDur, 1, 2.4);
-  fpState = "attack";
-}
-
-function setArmMode() {
-  const want = fpReady && !loadout.equip.mainhand;
-  if (want === fpMode) return;
-  fpMode = want;
-  if (fpArms) fpArms.visible = fpMode;
-  armL.visible = !fpMode;
-  armR.visible = !fpMode;
-  fpState = "idle";
-  if (fpMode) {
-    view.add(lantern);
-    lantern.position.set(-0.36, -0.44, -0.52);
-    lantern.rotation.set(0, 0, 0);
-    fpPlay("relax", 0.2, false);
-  } else {
-    armR.add(lantern);
-    lantern.position.set(0.03, -0.1, -0.06);
-    lantern.rotation.set(0, 0, 0);
-    if (fpCur) fpCur.fadeOut(0.15);
-  }
-}
-
-function updateFpArms(dt) {
-  if (!fpReady || !fpArms || !fpMode) return;
-  if (fpState === "idle" && charging && swing <= 0) {
-    fpState = "charge";
-    fpPlay("guard_idle", 0.15, false);
-  } else if (fpState === "charge" && !charging && swing <= 0) {
-    fpState = "idle";
-    fpPlay("relax", 0.2, false);
-  }
-  if (hitStop <= 0) fpMixer.update(dt);
-}
 
 const keys = Object.create(null);
 let locked = false;
@@ -1587,6 +1442,59 @@ function updateHarvestFx(dt, t) {
   if (rocksDirty && rockMesh) rockMesh.instanceMatrix.needsUpdate = true;
 }
 
+const WIND_X = 0.8;
+const WIND_Z = 0.6;
+const WIND_RADIUS = 175;
+const _windAxis = new THREE.Vector3(WIND_Z, 0, -WIND_X);
+const _qWTrunk = new THREE.Quaternion();
+const _qWLow = new THREE.Quaternion();
+const _qWTop = new THREE.Quaternion();
+
+function updateTreeWind(t) {
+  if (!treeMeshes) return;
+  const px = player.pos.x;
+  const pz = player.pos.z;
+  const R2 = WIND_RADIUS * WIND_RADIUS;
+  const near = WIND_RADIUS * 0.72;
+  const gust = 0.62 + 0.26 * Math.sin(t * 0.31) + 0.18 * Math.sin(t * 0.117 + 2.1);
+  let dirty = false;
+  for (const tr of trees) {
+    if (tr.state !== "alive" || harvestFx.has(tr)) continue;
+    const dx = tr.x - px;
+    const dz = tr.z - pz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > R2) continue;
+    let fade = 1;
+    if (d2 > near * near) {
+      const dist = Math.sqrt(d2);
+      fade = Math.max(0, 1 - (dist - near) / (WIND_RADIUS - near));
+    }
+    const w =
+      Math.sin(t * 1.25 + tr.wp) * 0.6 +
+      Math.sin(t * 2.15 + tr.wp * 1.7) * 0.25 +
+      Math.sin(t * 0.62 - (tr.x + tr.z) * 0.04) * 0.15;
+    const sway = 0.06 * tr.wv * gust * w * fade;
+    const i = tr.idx;
+    const sx = tr.x;
+    const sy = tr.h;
+    const sz = tr.z;
+    const sc = tr.sc;
+    _qYaw.setFromEuler(_eYaw.set(0, tr.rotY, 0));
+    tmpM.compose(tmpV.set(sx, sy, sz), _qWTrunk.setFromAxisAngle(_windAxis, sway * 0.4).multiply(_qYaw), tmpS.set(sc, sc, sc));
+    treeMeshes.trunks.setMatrixAt(i, tmpM);
+    tmpM.compose(tmpV.set(sx, sy, sz), _qWLow.setFromAxisAngle(_windAxis, sway).multiply(_qYaw), tmpS.set(sc, sc, sc));
+    treeMeshes.lows.setMatrixAt(i, tmpM);
+    tmpM.compose(tmpV.set(sx, sy, sz), _qWTop.setFromAxisAngle(_windAxis, sway * 1.3).multiply(_qYaw), tmpS.set(sc, sc, sc));
+    treeMeshes.tops.setMatrixAt(i, tmpM);
+    dirty = true;
+  }
+  if (dirty) {
+    treeMeshes.trunks.instanceMatrix.needsUpdate = true;
+    treeMeshes.lows.instanceMatrix.needsUpdate = true;
+    treeMeshes.tops.instanceMatrix.needsUpdate = true;
+  }
+}
+
 const harvestWrap = document.getElementById("harvest");
 const harvestLabel = document.getElementById("harvestLabel");
 const harvestFill = document.getElementById("harvestFill");
@@ -1634,7 +1542,6 @@ function doAttack(heavy, power = 0) {
   attackCd = atkDur * (heavy ? 1 : 0.9);
   swing = 1;
   playSwing(kind);
-  playFpAttack(heavy);
   if (heavy) playGrunt();
   else if (atkSpec.w >= 0.55 || Math.random() < 0.35) playGrunt();
   const mult = heavy ? 1.6 + power * 0.9 : 1;
@@ -1917,14 +1824,13 @@ function animate() {
   if (hitStop > 0) hitStop -= dt;
   if (swing > 0) swing = Math.max(0, swing - (hitStop > 0 ? 0 : dt) / atkDur);
   updateHeld();
-  setArmMode();
   updateBodyAnim(dt, t);
-  updateFpArms(dt);
 
   const dayF = updateSky();
   if (simulate) {
     updateCreatures(dt, t, dayF);
     updateHarvestFx(dt, t);
+    updateTreeWind(t);
     updateClouds(dt);
   }
   updateAmbience(dt, {

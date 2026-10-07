@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wide Lands — First Person Explorer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%234e7f36'/><path d='M0 11h16v5H0z' fill='%23bfa87a'/><circle cx='12' cy='4' r='2' fill='%23fff6d8'/></svg>" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="hud">
+    <div id="crosshair"></div>
+    <div id="harvest" class="hidden">
+      <span id="harvestLabel">Tree 0%</span>
+      <div id="harvestTrack"><i id="harvestFill"></i></div>
+    </div>
+    <div id="stats">
+      <div>POS <span id="pos">0, 0</span></div>
+      <div>ALT <span id="alt">0</span> m</div>
+      <div>TIME <span id="clock">06:00</span></div>
+      <div>MODE <span id="modeTag">SURVIVAL</span></div>
+      <div>FPS <span id="fps">0</span></div>
+    </div>
+
+    <div id="bars">
+      <div class="bar" id="healthWrap"><i class="ico">+</i><div class="fill" id="health"></div></div>
+      <div class="bar" id="hungerWrap"><i class="ico">◉</i><div class="fill" id="hunger"></div></div>
+      <div class="bar" id="staminaWrap"><i class="ico">»</i><div class="fill" id="stamina"></div></div>
+      <div class="bar hidden" id="breathWrap"><i class="ico">≈</i><div class="fill" id="breath"></div></div>
+    </div>
+
+    <div id="hotbar"></div>
+    <canvas id="minimap" width="170" height="170"></canvas>
+    <div id="depth">depth</div>
+    <div id="toasts"></div>
+  </div>
+
+  <div id="backpack" class="overlay hidden">
+    <div class="inv-window">
+      <header class="inv-head">
+        <h2>BACKPACK</h2>
+        <div class="tabs">
+          <button class="tab active" data-tab="bag">Backpack</button>
+          <button class="tab" data-tab="creative">Creative</button>
+        </div>
+        <button id="invClose" class="icon-btn" title="Close (Tab)">✕</button>
+      </header>
+      <div class="inv-body">
+        <div class="char-side">
+          <svg class="wires" viewBox="0 0 300 400" preserveAspectRatio="none">
+            <line x1="52" y1="36" x2="118" y2="200" />
+            <line x1="52" y1="116" x2="118" y2="200" />
+            <line x1="52" y1="196" x2="118" y2="200" />
+            <line x1="52" y1="276" x2="118" y2="200" />
+            <line x1="248" y1="116" x2="182" y2="200" />
+            <line x1="248" y1="196" x2="182" y2="200" />
+          </svg>
+          <div class="equip-slot" data-slot-equip="head" style="left:8px;top:10px"></div>
+          <div class="equip-slot" data-slot-equip="chest" style="left:8px;top:90px"></div>
+          <div class="equip-slot" data-slot-equip="legs" style="left:8px;top:170px"></div>
+          <div class="equip-slot" data-slot-equip="feet" style="left:8px;top:250px"></div>
+          <div class="equip-slot" data-slot-equip="mainhand" style="left:224px;top:90px"></div>
+          <div class="equip-slot" data-slot-equip="offhand" style="left:224px;top:170px"></div>
+          <canvas id="charView" width="184" height="360"></canvas>
+          <div class="char-hint">drag to rotate</div>
+        </div>
+        <div class="bag-side">
+          <div class="grid-wrap"><div id="invGrid" class="grid"></div></div>
+          <div class="grid-wrap hidden"><div id="creativeGrid" class="grid"></div></div>
+          <div class="item-info">
+            <div class="ii-icon" id="iiIcon"></div>
+            <div class="ii-text">
+              <div class="ii-name" id="iiName">Nothing selected</div>
+              <div class="ii-desc" id="iiDesc">Click an item to inspect it.</div>
+            </div>
+            <div class="ii-actions">
+              <button id="btnEquip" style="display:none">Equip</button>
+              <button id="btnUse" style="display:none">Eat</button>
+              <button id="btnDrop" class="danger">Drop</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <footer class="inv-foot">
+        Drag to move · double-click to equip/eat · click a slot then another to move · Tab to close
+      </footer>
+    </div>
+  </div>
+
+  <div id="pause" class="overlay hidden">
+    <div class="panel">
+      <h2 class="panel-title">PAUSED</h2>
+      <div class="pause-actions">
+        <button id="btnResume">RESUME</button>
+        <button id="btnSettings">SETTINGS</button>
+        <button id="btnQuit">MAIN MENU</button>
+      </div>
+      <div id="settings" class="settings hidden">
+        <div class="set-cols">
+          <div class="set-col">
+            <h3>Sound</h3>
+            <label>Master <span class="val" id="vMaster">85%</span>
+              <input type="range" id="sMaster" min="0" max="100" value="85" />
+            </label>
+            <label>Effects <span class="val" id="vSfx">100%</span>
+              <input type="range" id="sSfx" min="0" max="100" value="100" />
+            </label>
+            <label>Ambience <span class="val" id="vAmb">100%</span>
+              <input type="range" id="sAmb" min="0" max="100" value="100" />
+            </label>
+            <label>Music <span class="val" id="vMusic">65%</span>
+              <input type="range" id="sMusic" min="0" max="100" value="65" />
+            </label>
+            <label class="row">Mute all <input type="checkbox" id="sMute" /></label>
+          </div>
+          <div class="set-col">
+            <h3>Controls &amp; Video</h3>
+            <label>Mouse sensitivity <span class="val" id="vSens">100%</span>
+              <input type="range" id="sSens" min="20" max="300" value="100" />
+            </label>
+            <label>Field of view <span class="val" id="vFov">74</span>
+              <input type="range" id="sFov" min="60" max="110" value="74" />
+            </label>
+            <label class="row">Shadows <input type="checkbox" id="sShadows" checked /></label>
+            <label class="row">Show minimap <input type="checkbox" id="sMinimap" checked /></label>
+          </div>
+          <div class="set-col">
+            <h3>Game</h3>
+            <label class="row">Game mode
+              <select id="sMode">
+                <option value="survival">Survival</option>
+                <option value="creative">Creative</option>
+              </select>
+            </label>
+            <p class="set-note" id="modeNote">Survival: hunger, health, fall damage and wolves.</p>
+            <button id="btnResetWorld" class="small danger">New world (reset inventory)</button>
+          </div>
+        </div>
+        <div class="set-foot"><button id="btnSettingsBack">← Back</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="death" class="overlay hidden">
+    <div class="panel death-panel">
+      <h2 class="death-title">YOU DIED</h2>
+      <p id="deathReason">The wilds claimed you.</p>
+      <button id="btnRespawn">RESPAWN</button>
+    </div>
+  </div>
+
+  <div id="menu" class="overlay">
+    <div class="panel">
+      <h1>WIDE LANDS</h1>
+      <p class="sub">A 2 km first-person world</p>
+      <div class="mode-pick">
+        <button class="mode-btn active" data-mode="survival">SURVIVAL</button>
+        <button class="mode-btn" data-mode="creative">CREATIVE</button>
+      </div>
+      <div class="controls">
+        <div><b>W A S D</b> move</div>
+        <div><b>Mouse</b> look</div>
+        <div><b>LMB</b> attack</div>
+        <div><b>RMB</b> eat / use</div>
+        <div><b>Shift</b> sprint</div>
+        <div><b>Space</b> jump / swim / fly up</div>
+        <div><b>Ctrl</b> crouch / fly down</div>
+        <div><b>Tab</b> backpack</div>
+        <div><b>1 – 6</b> hotbar</div>
+        <div><b>F</b> toggle fly (creative)</div>
+        <div><b>T</b> advance time</div>
+        <div><b>M</b> mute · <b>Esc</b> pause</div>
+      </div>
+      <button id="play">CLICK TO PLAY</button>
+    </div>
+  </div>
+
+  <div id="waterfx"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
